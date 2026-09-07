@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  # Servicio 1: API de Backend (FastAPI)
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: logiai_api
+    ports:
+      - "8000:8000"
+    volumes:
+      # Sincroniza el código local con el contenedor para que aplique cambios en vivo (Hot Reload)
+      - ./backend:/app
+    environment:
+      - ENVIRONMENT=development
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Servicio 2: Servidor de Caché (Redis) - Lo usaremos en el Módulo 2 para optimizar las respuestas de la IA
+  redis:
+    image: redis:7-alpine
+    container_name: logiai_redis
+    ports:
+      - "6379:6379"
