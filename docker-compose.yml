@@ -14,6 +14,7 @@ services:
       - ./backend:/app
     environment:
       - ENVIRONMENT=development
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Servicio 2: Servidor de Caché (Redis) - Lo usaremos en el Módulo 2 para optimizar las respuestas de la IA
