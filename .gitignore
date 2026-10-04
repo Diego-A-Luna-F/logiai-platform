@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Variables de entorno y secretos
+.env
+.env.*
+!.env.example
+
+# Archivos de entorno virtual de Python
+backend/venv/
+venv/
+__pycache__/
+*.pyc
+
+# Archivos de caché de sistema
+.DS_Store
