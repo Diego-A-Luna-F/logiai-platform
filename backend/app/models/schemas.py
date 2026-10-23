@@ -24,3 +24,27 @@ class DocumentAnalysisResponse(BaseModel):
     raw_text_preview: str
     ai_analysis: Optional[AIAnalysisReport] = None
     processed_at: datetime = Field(default_factory=datetime.utcnow)
+
+# Esquemas Historial (GET)
+
+class AnalysisReportDB(BaseModel):
+    summary: str
+    risk_level: str
+    anomalies: List[str]
+    items_detected: List[dict]
+
+    class Config:
+        from_attributes = True  # Permite que Pydantic lea directamente los modelos de SQLAlchemy
+
+class DocumentHistoryResponse(BaseModel):
+    id: int
+    filename: str
+    file_type: str
+    total_lines: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class DocumentDetailResponse(DocumentHistoryResponse):
+    analysis: Optional[AnalysisReportDB] = None
