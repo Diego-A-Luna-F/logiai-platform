@@ -109,7 +109,11 @@ async def upload_document(
 )
 async def get_documents_history(limit: int = 10, db: Session = Depends(get_db)):
     """Devuelve los últimos manifiestos procesados ordenados por los más recientes."""
-    docs = db.query(DocumentModel).order_by(DocumentModel.created_at.desc()).limit(limit).all()
+    docs = db.query(DocumentModel)\
+        .options(joinedload(DocumentModel.analysis))\
+        .order_by(DocumentModel.created_at.desc())\
+        .limit(limit)\
+        .all()
     return docs
 
 

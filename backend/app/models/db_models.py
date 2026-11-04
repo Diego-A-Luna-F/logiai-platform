@@ -17,6 +17,13 @@ class DocumentModel(Base):
     # Relación 1 a 1 con el reporte de análisis
     analysis = relationship("AnalysisReportModel", back_populates="document", uselist=False, cascade="all, delete-orphan")
 
+    @property
+    def risk_level(self):
+        """Devuelve el nivel de riesgo de forma plana y ligera para las tablas de listado."""
+        if self.analysis:
+            return self.analysis.risk_level
+        return "N/A"
+
 
 class AnalysisReportModel(Base):
     """Tabla que guarda el diagnóstico de riesgo y los SKUs detectados por la IA."""

@@ -42,6 +42,7 @@ class DocumentHistoryResponse(BaseModel):
     file_type: str
     total_lines: int
     created_at: datetime
+    risk_level: str
 
     class Config:
         from_attributes = True
