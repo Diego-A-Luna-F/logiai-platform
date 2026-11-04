@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # Servicio 1: API de Backend (FastAPI)
+  # API de Backend (FastAPI)
   api:
     build:
       context: ./backend
@@ -18,9 +18,28 @@ services:
       - redis
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-  # Servicio 2: Servidor de Caché (Redis)
+  # Servidor de Caché (Redis)
   redis:
     image: redis:7-alpine
     container_name: logiai_redis
     ports:
       - "6379:6379"
+
+  # Interfaz de Usuario (React + Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: logiai_frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      # Sincroniza el código local con el contenedor (Hot Reload)
+      - ./frontend:/app
+      # Volumen anónimo para proteger las dependencias instaladas dentro del contenedor
+      - /app/node_modules
+    environment:
+      # Asegura que el Hot Reload de Vite funcione correctamente bajo WSL 2 y Docker en Windows
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - api
