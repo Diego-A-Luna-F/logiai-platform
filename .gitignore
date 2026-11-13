@@ -230,3 +230,7 @@ __pycache__/
 
 # Archivos de caché de sistema
 .DS_Store
+
+# Bases de datos
+*.db
+backend/logiai.db
