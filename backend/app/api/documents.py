@@ -1,7 +1,7 @@
 import hashlib
 from fastapi import APIRouter, UploadFile, File, HTTPException, Response, status, Depends
 from sqlalchemy.orm import Session, joinedload
-from typing import List
+from typing import List, Optional
 
 from app.models.schemas import DocumentAnalysisResponse, AIAnalysisReport, DocumentHistoryResponse, DocumentDetailResponse
 from app.models.db_models import DocumentModel, AnalysisReportModel
@@ -9,6 +9,8 @@ from app.services.document_processor import DocumentProcessorService
 from app.services.ai_service import AIService
 from app.services.cache_service import CacheService
 from app.db.database import get_db
+
+from app.services.s3_service import s3_service
 
 router = APIRouter(
     prefix="/api/v1/documents",
@@ -19,7 +21,7 @@ router = APIRouter(
     "/upload",
     response_model=DocumentAnalysisResponse,
     status_code=status.HTTP_200_OK,
-    summary="Subir y analizar manifiesto o reporte con IA, Caché Redis y Persistencia SQL"
+    summary="Subir y analizar manifiesto con Validación, Deduplicación, S3, Redis y SQL"
 )
 async def upload_document(
     response: Response, 
@@ -29,20 +31,21 @@ async def upload_document(
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
 
-    # Ahorro de tokens
+    # VALIDACIÓN PRIMERO: Extraer texto y validar formato antes de tocar AWS
     extracted_data = await DocumentProcessorService.process_file(file)
     clean_text = extracted_data.get("full_text", "")
 
-    # Generar Hash SHA-256 único del contenido
+    if not clean_text.strip():
+        raise HTTPException(status_code=400, detail="El documento está vacío o no contiene texto legible.")
+
+    # DEDUPLICACIÓN: Calcular Hash SHA-256 y revisar caché
     text_hash = hashlib.sha256(clean_text.encode('utf-8')).hexdigest()
     cache_key = f"doc_analysis:{text_hash}"
-
     cache_service = CacheService()
 
-    # Consultar si existe en Redis (Cache Hit)
     cached_analysis = cache_service.get(cache_key)
     if cached_analysis:
-        print("--- [REDIS] RETORNANDO RESULTADO DESDE CACHÉ (CACHE HIT) ---")
+        print("--- [REDIS] CACHE HIT: Evitando subida duplicada a S3 y llamada a IA ---")
         return DocumentAnalysisResponse(
             filename=extracted_data["filename"],
             file_type=extracted_data["file_type"],
@@ -51,20 +54,32 @@ async def upload_document(
             ai_analysis=AIAnalysisReport(**cached_analysis)
         )
 
-    # Si NO está en caché (Cache Miss), procesar con Gemini AI
+    # Revisar también en SQL por si expiró en Redis pero ya fue respaldado en S3
+    existing_doc = db.query(DocumentModel).filter(DocumentModel.file_hash == text_hash).first()
+
+    # ALMACENAMIENTO EN LA NUBE: Subir a S3 solo si es un documento nuevo y válido
+    if not existing_doc:
+        await file.seek(0)
+        contents = await file.read()
+        try:
+            s3_object_key = s3_service.upload_file(
+                file_bytes=contents,
+                original_filename=file.filename,
+                content_type=file.content_type or "application/octet-stream"
+            )
+            print(f"--- [AWS S3] NUEVO MANIFIESTO RESPALDADO: {s3_object_key} ---")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error subiendo a S3: {str(e)}")
+
+    # PROCESAMIENTO IA Y PERSISTENCIA
     try:
-        print("--- [GEMINI] NO ESTÁ EN CACHÉ. PROCESANDO CON IA ---")
+        print("--- [GEMINI] PROCESANDO DOCUMENTO NUEVO CON IA ---")
         ai_service = AIService()
         ai_analysis = await ai_service.analyze_logistics_document(clean_text)
 
-        # Guardar respuesta en Redis (Expiración de 1 hora)
         cache_service.set(cache_key, ai_analysis.model_dump())
 
-        # Guardar permanentemente en la Base de Datos SQL
-        existing_doc = db.query(DocumentModel).filter(DocumentModel.file_hash == text_hash).first()
-        
         if not existing_doc:
-            # Crear registro del Documento
             new_doc = DocumentModel(
                 filename=extracted_data["filename"],
                 file_type=extracted_data["file_type"],
@@ -75,7 +90,6 @@ async def upload_document(
             db.commit()
             db.refresh(new_doc)
 
-            # Crear registro del Reporte asociado
             new_report = AnalysisReportModel(
                 document_id=new_doc.id,
                 summary=ai_analysis.summary,
@@ -88,7 +102,7 @@ async def upload_document(
             print(f"--- [DATABASE] REGISTRO GUARDADO EN DB CON ID: {new_doc.id} ---")
 
     except Exception as e:
-        db.rollback()  # Revierte la transacción en la base de datos si ocurre un error
+        db.rollback()
         raise HTTPException(
             status_code=500,
             detail=f"Error durante el procesamiento o almacenamiento: {str(e)}"
@@ -105,15 +119,29 @@ async def upload_document(
 @router.get(
     "/", 
     response_model=List[DocumentHistoryResponse],
-    summary="Listar el historial de documentos analizados"
+    summary="Listar y filtrar el historial de documentos analizados"
 )
-async def get_documents_history(limit: int = 10, db: Session = Depends(get_db)):
-    """Devuelve los últimos manifiestos procesados ordenados por los más recientes."""
-    docs = db.query(DocumentModel)\
-        .options(joinedload(DocumentModel.analysis))\
-        .order_by(DocumentModel.created_at.desc())\
-        .limit(limit)\
-        .all()
+async def get_documents_history(
+    limit: int = 20, 
+    search: Optional[str] = None, 
+    risk_level: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Devuelve los manifiestos aplicando filtros de búsqueda en la base de datos."""
+    
+    # Iniciamos la consulta base uniendo la tabla de reportes
+    query = db.query(DocumentModel).outerjoin(DocumentModel.analysis).options(joinedload(DocumentModel.analysis))
+    
+    # Filtro por nombre
+    if search:
+        query = query.filter(DocumentModel.filename.ilike(f"%{search}%"))
+        
+    # Filtro por nivel de riesgo
+    if risk_level:
+        query = query.filter(AnalysisReportModel.risk_level == risk_level)
+        
+    # Ejecutamos consulta final ordenada y limitada
+    docs = query.order_by(DocumentModel.created_at.desc()).limit(limit).all()
     return docs
 
 
