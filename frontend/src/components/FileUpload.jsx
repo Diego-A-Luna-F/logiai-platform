@@ -56,9 +56,9 @@ export default function FileUpload({ onUploadSuccess }) {
           <p className="mb-1 text-sm text-slate-300 font-medium">
             {loading ? 'Procesando con Gemini AI...' : 'Haz clic o arrastra un manifiesto aquí'}
           </p>
-          <p className="text-xs text-slate-500">PDF o TXT (Formatos soportados)</p>
+          <p className="text-xs text-slate-500">PDF o CSV (Formatos soportados)</p>
         </div>
-        <input type="file" className="hidden" onChange={handleFileChange} accept=".pdf,.txt" disabled={loading} />
+        <input type="file" className="hidden" onChange={handleFileChange} accept=".pdf,.csv" disabled={loading} />
       </label>
     </div>
   )
